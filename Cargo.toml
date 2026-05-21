@@ -18,6 +18,7 @@ include = [
     "CHANGELOG.md",
     "src/**",
     "tests/**",
+    "docs/trusted-publishing.md",
 ]
 
 [dependencies]
