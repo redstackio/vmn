@@ -4,6 +4,14 @@ All notable changes to `vmn` will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-05-21
+
+### Added
+
+- Added `vmn pythons` to list Python interpreters discovered on `PATH`.
+- Added Python version selectors for environment creation, so `vmn create api --python 3.12` can resolve an installed `python3.12` interpreter.
+- Added support for full Python executable paths in `vmn create --python`.
+
 ## [0.1.0] - 2026-05-21
 
 ### Added

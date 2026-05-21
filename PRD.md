@@ -189,6 +189,20 @@ Default human output should be concise and sorted by last used, then name.
 <id>\t<name>\t<status>\t<path>\t<python_version>\t<last_used_at>
 ```
 
+### `vmn pythons`
+
+Lists Python interpreters discovered on `PATH`.
+
+Options:
+
+- `--json`: JSON output.
+
+Behavior:
+
+- Detects `python`, `python3`, and versioned executables such as `python3.11` and `python3.12`.
+- Prints executable path, executable name, full Python version, and major/minor version key.
+- Intended to help users choose the interpreter for `vmn create --python`.
+
 ### `vmn activate-path <selector>`
 
 Prints the activation script path for one active environment and updates `last_used_at`.
@@ -220,12 +234,14 @@ Modes:
 
 Options:
 
-- `--python <executable>`: Python executable to use.
+- `--python <selector>`: Python executable, full path, or version selector to use.
 - `--no-activate-output`: do not print activation path after creation.
 
 Behavior:
 
 - Runs `<python> -m venv <path>`.
+- `--python 3.12` resolves an installed matching interpreter from `vmn pythons`.
+- `--python python3.12` and `--python /path/to/python3.12` are also supported.
 - Records Python and pip versions when available.
 - Prints the activation script path on success unless suppressed.
 

@@ -38,6 +38,15 @@ fn fake_env(path: &Path) {
     fs::write(path.join("bin").join("activate"), "# activate\n").unwrap();
 }
 
+fn current_python_major_minor() -> String {
+    let output = Command::new("python3").arg("--version").output().unwrap();
+    assert!(output.status.success());
+    let version = String::from_utf8_lossy(&output.stdout);
+    let version = version.trim().strip_prefix("Python ").unwrap();
+    let mut parts = version.split('.');
+    format!("{}.{}", parts.next().unwrap(), parts.next().unwrap())
+}
+
 #[test]
 fn init_prints_zsh_snippet_and_creates_state() {
     let state = TestState::new();
@@ -66,6 +75,18 @@ fn init_prints_bash_snippet() {
         .stdout(predicate::str::contains("VMN bash integration"))
         .stdout(predicate::str::contains("bind -x"))
         .stdout(predicate::str::contains("vmn list --fzf"));
+}
+
+#[test]
+fn pythons_lists_interpreters() {
+    let state = TestState::new();
+
+    state
+        .cmd()
+        .args(["pythons", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("python"));
 }
 
 #[test]
@@ -108,10 +129,11 @@ fn scan_lists_and_activates_fake_project_env() {
 #[test]
 fn create_info_refresh_and_remove_managed_env() {
     let state = TestState::new();
+    let python_version = current_python_major_minor();
 
     let output = state
         .cmd()
-        .args(["create", "demo", "--python", "python3"])
+        .args(["create", "demo", "--python", &python_version])
         .output()
         .unwrap();
     assert!(

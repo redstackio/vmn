@@ -155,6 +155,17 @@ Use managed envs when you want named environments independent of a project folde
 
 ## Commands
 
+### `vmn pythons`
+
+List Python interpreters discovered on `PATH`.
+
+```zsh
+vmn pythons
+vmn pythons --json
+```
+
+Use this before creating a venv when multiple Python versions are installed.
+
 ### `vmn init`
 
 Create config/data directories, initialize the SQLite registry, and print shell integration.
@@ -190,10 +201,12 @@ Create and register a new venv.
 vmn create api
 vmn create api --here
 vmn create api --path ~/scratch/api-venv
+vmn create api --python 3.12
 vmn create api --python python3.12
+vmn create api --python /opt/homebrew/bin/python3.12
 ```
 
-By default, `vmn create <name>` creates a managed environment. `--here` creates `./.venv` in the current directory.
+By default, `vmn create <name>` creates a managed environment. `--here` creates `./.venv` in the current directory. `--python` accepts an executable name, a full executable path, or a version selector such as `3.11` or `3.12`.
 
 ### `vmn scan`
 

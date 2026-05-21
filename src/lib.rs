@@ -50,6 +50,7 @@ enum Commands {
     Refresh(RefreshArgs),
     Remove(RemoveArgs),
     Prune(PruneArgs),
+    Pythons(PythonsArgs),
     Doctor,
 }
 
@@ -148,6 +149,12 @@ struct PruneArgs {
     yes: bool,
 }
 
+#[derive(Args, Debug)]
+struct PythonsArgs {
+    #[arg(long)]
+    json: bool,
+}
+
 pub fn run() -> Result<()> {
     run_with_args(std::env::args_os())
 }
@@ -188,6 +195,7 @@ impl App {
             Commands::Refresh(args) => self.refresh(args),
             Commands::Remove(args) => self.remove(args),
             Commands::Prune(args) => self.prune(args),
+            Commands::Pythons(args) => self.pythons(args),
             Commands::Doctor => self.doctor(),
         }
     }
@@ -329,11 +337,9 @@ impl App {
                     .parent()
                     .ok_or_else(|| anyhow!("target path has no parent: {}", target.display()))?,
             )?;
+            let python = resolve_python_selector(&args.python)?;
             run_checked(
-                Command::new(&args.python)
-                    .arg("-m")
-                    .arg("venv")
-                    .arg(&target),
+                Command::new(&python).arg("-m").arg("venv").arg(&target),
                 "failed to create virtual environment",
             )?;
         }
@@ -604,6 +610,25 @@ impl App {
         Ok(())
     }
 
+    fn pythons(&self, args: PythonsArgs) -> Result<()> {
+        let interpreters = discover_python_interpreters();
+        if args.json {
+            print_json(&interpreters)?;
+        } else if interpreters.is_empty() {
+            println!("no Python interpreters found on PATH");
+        } else {
+            for interpreter in interpreters {
+                println!(
+                    "{:<10} {:<14} {}",
+                    interpreter.version_key.as_deref().unwrap_or("-"),
+                    interpreter.version.as_deref().unwrap_or("-"),
+                    interpreter.path
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn doctor(&self) -> Result<()> {
         let mut issues = 0usize;
         report_check(
@@ -618,11 +643,13 @@ impl App {
         );
         report_check("database exists", self.paths.db_path.exists(), &mut issues);
         report_optional_check("fzf installed", which::which("fzf").is_ok());
+        let python_count = discover_python_interpreters().len();
         report_check(
-            "python3 available",
-            which::which("python3").is_ok(),
+            "python available",
+            python_count > 0 || which::which("python3").is_ok(),
             &mut issues,
         );
+        println!("check python interpreters discovered: {python_count}");
 
         let active = self.registry.list(StatusFilter::ActiveOnly)?;
         for env in &active {
@@ -817,6 +844,14 @@ struct ScanSummary {
 struct Probe {
     python_version: Option<String>,
     pip_version: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PythonInterpreter {
+    path: String,
+    executable: String,
+    version: Option<String>,
+    version_key: Option<String>,
 }
 
 struct Registry {
@@ -1302,9 +1337,24 @@ fn command_stdout(command: &mut Command) -> Result<String> {
     Ok(stdout.trim().to_string())
 }
 
+fn command_output_text(command: &mut Command) -> Result<String> {
+    let output = command.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("{stderr}");
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return Ok(stdout);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
 fn probe_basic(root: &Path) -> Probe {
     let python = python_executable(root);
-    let python_version = command_stdout(Command::new(&python).arg("--version")).ok();
+    let python_version = command_output_text(Command::new(&python).arg("--version")).ok();
     let pip_version =
         command_stdout(Command::new(&python).arg("-m").arg("pip").arg("--version")).ok();
     Probe {
@@ -1329,6 +1379,158 @@ fn probe_packages(root: &Path) -> Result<Vec<PipPackage>> {
             .arg("--format=json"),
     )?;
     serde_json::from_str(&output).context("failed to parse pip package list")
+}
+
+fn resolve_python_selector(selector: &str) -> Result<PathBuf> {
+    if selector.trim().is_empty() {
+        bail!("Python selector cannot be empty");
+    }
+
+    let selector_path = Path::new(selector);
+    if selector_path.components().count() > 1 || selector_path.is_absolute() {
+        if selector_path.exists() {
+            return absolute_existing(selector_path);
+        }
+        bail!("Python executable not found: {selector}");
+    }
+
+    if let Ok(path) = which::which(selector) {
+        return Ok(path);
+    }
+
+    let interpreters = discover_python_interpreters();
+    let matches: Vec<_> = interpreters
+        .into_iter()
+        .filter(|interpreter| python_selector_matches(selector, interpreter))
+        .collect();
+
+    match matches.len() {
+        0 => bail!(
+            "no Python interpreter matches '{selector}'. Run 'vmn pythons' to see installed versions"
+        ),
+        _ => Ok(PathBuf::from(&matches[0].path)),
+    }
+}
+
+fn python_selector_matches(selector: &str, interpreter: &PythonInterpreter) -> bool {
+    let normalized = selector.strip_prefix("python").unwrap_or(selector);
+    interpreter.version_key.as_deref() == Some(selector)
+        || interpreter.version_key.as_deref() == Some(normalized)
+        || interpreter
+            .version
+            .as_deref()
+            .is_some_and(|version| version == selector || version == normalized)
+        || interpreter.executable == selector
+}
+
+fn discover_python_interpreters() -> Vec<PythonInterpreter> {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+
+    let mut seen = HashSet::new();
+    let mut interpreters = Vec::new();
+
+    for dir in std::env::split_paths(&path_var) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+                continue;
+            };
+
+            if !is_python_executable_name(name) {
+                continue;
+            }
+
+            let canonical = path.canonicalize().unwrap_or(path);
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+
+            if let Some(interpreter) = inspect_python_interpreter(&canonical) {
+                interpreters.push(interpreter);
+            }
+        }
+    }
+
+    interpreters.sort_by(|left, right| {
+        python_version_sort_key(right)
+            .cmp(&python_version_sort_key(left))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    interpreters
+}
+
+fn is_python_executable_name(name: &str) -> bool {
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    if name == "python" || name == "python3" {
+        return true;
+    }
+
+    let Some(version) = name.strip_prefix("python") else {
+        return false;
+    };
+    !version.is_empty()
+        && version
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+}
+
+fn inspect_python_interpreter(path: &Path) -> Option<PythonInterpreter> {
+    let version_output = command_output_text(Command::new(path).arg("--version")).ok()?;
+    let version = parse_python_version(&version_output)?;
+    let version_key = major_minor_version(&version);
+    Some(PythonInterpreter {
+        path: path_to_string(path),
+        executable: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path_to_string(path)),
+        version: Some(version),
+        version_key,
+    })
+}
+
+fn parse_python_version(output: &str) -> Option<String> {
+    let version = output.trim().strip_prefix("Python ")?;
+    let cleaned: String = version
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn major_minor_version(version: &str) -> Option<String> {
+    let mut parts = version.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    Some(format!("{major}.{minor}"))
+}
+
+fn python_version_sort_key(interpreter: &PythonInterpreter) -> (u64, u64, u64) {
+    let Some(version) = interpreter.version.as_deref() else {
+        return (0, 0, 0);
+    };
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
 }
 
 enum RefreshState {
