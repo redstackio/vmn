@@ -1,0 +1,37 @@
+[package]
+name = "vmn"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Fast local Python virtual environment manager with zsh/fzf integration"
+readme = "README.md"
+license = "MIT"
+documentation = "https://docs.rs/vmn"
+keywords = ["python", "venv", "virtualenv", "fzf", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "src/**",
+    "tests/**",
+]
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+directories = "6.0.0"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+ulid = "1.2.1"
+walkdir = "2.5.0"
+which = "8.0.2"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+tempfile = "3.27.0"

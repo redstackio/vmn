@@ -1,0 +1,10 @@
+/target
+/.idea
+/.vscode
+*.swp
+*.swo
+*.tmp
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
