@@ -7,6 +7,7 @@ description = "Fast local Python virtual environment manager with zsh/fzf integr
 readme = "README.md"
 license = "MIT"
 documentation = "https://docs.rs/vmn"
+repository = "https://github.com/redstackio/vmn"
 keywords = ["python", "venv", "virtualenv", "fzf", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 include = [
