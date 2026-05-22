@@ -39,6 +39,8 @@ pub struct Cli {
 enum Commands {
     Init(InitArgs),
     List(ListArgs),
+    Activate(SelectorArgs),
+    Deactivate,
     #[command(name = "activate-path")]
     ActivatePath(SelectorArgs),
     Path(SelectorArgs),
@@ -186,6 +188,8 @@ impl App {
         match cli.command {
             Commands::Init(args) => self.init(args),
             Commands::List(args) => self.list(args),
+            Commands::Activate(args) => self.activate(&args.selector),
+            Commands::Deactivate => self.deactivate_guidance(),
             Commands::ActivatePath(args) => self.activate_path(&args.selector),
             Commands::Path(args) => self.path(&args.selector),
             Commands::ProjectDir(args) => self.project_dir(&args.selector),
@@ -267,6 +271,38 @@ impl App {
                 println!("    last used: {last_used}");
             }
         }
+        Ok(())
+    }
+
+    fn activate(&self, selector: &str) -> Result<()> {
+        let env = self.registry.resolve_selector(selector, false)?;
+        if env.status != EnvStatus::Active.as_str() {
+            bail!("environment '{}' is {}", env.name, env.status);
+        }
+
+        let root = PathBuf::from(&env.path);
+        if !root.exists() {
+            self.registry.mark_status(&env.id, EnvStatus::Missing)?;
+            bail!("environment path is missing: {}", root.display());
+        }
+
+        let activate = activation_script(&root);
+        if !activate.exists() {
+            self.registry.mark_status(&env.id, EnvStatus::Missing)?;
+            bail!("activation script is missing: {}", activate.display());
+        }
+
+        self.registry.update_last_used(&env.id)?;
+        launch_activated_subshell(&env, &activate)?;
+        Ok(())
+    }
+
+    fn deactivate_guidance(&self) -> Result<()> {
+        eprintln!(
+            "vmn deactivate must run through shell integration to affect your current shell.\n\
+             Run `vmn init --shell zsh` or `vmn init --shell bash`, add the snippet to your shell config, then use `vmn deactivate`.\n\
+             Without shell integration, `vmn activate <selector>` starts an activated subshell; type `exit` to leave it."
+        );
         Ok(())
     }
 
@@ -1145,34 +1181,69 @@ fn row_to_environment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Environment> 
 
 fn zsh_snippet() -> &'static str {
     r##"# VMN zsh integration
-v() {
-  local selected id project_dir activate_path
+_vmn_activate() {
+  local selector project_dir activate_path
+  selector="$1"
+  [[ -z "$selector" ]] && return 1
 
-  if ! command -v fzf >/dev/null 2>&1; then
-    echo 'vmn: fzf is required for the interactive picker. Install fzf or use "vmn list" and source "$(vmn activate-path <selector>)".' >&2
-    return 1
-  fi
-
-  selected=$(vmn list --fzf | fzf --delimiter=$'\t' --with-nth=2,3,4 --height=40% --reverse) || return
-  id=${selected%%$'\t'*}
-  [[ -z "$id" ]] && return
-
-  project_dir=$(vmn project-dir "$id") || return
+  project_dir=$(command vmn project-dir "$selector") || return
   if [[ -n "$project_dir" ]]; then
     cd "$project_dir" || return
   fi
 
-  activate_path=$(vmn activate-path "$id") || return
+  activate_path=$(command vmn activate-path "$selector") || return
   source "$activate_path"
 }
 
-vd() {
+_vmn_deactivate() {
   if (( $+functions[deactivate] )); then
     deactivate
   else
     echo "No active Python virtual environment." >&2
     return 1
   fi
+}
+
+vmn() {
+  case "$1" in
+    activate)
+      shift
+      if [[ $# -ne 1 ]]; then
+        echo "usage: vmn activate <name-or-id>" >&2
+        return 2
+      fi
+      _vmn_activate "$1"
+      ;;
+    deactivate)
+      shift
+      if [[ $# -ne 0 ]]; then
+        echo "usage: vmn deactivate" >&2
+        return 2
+      fi
+      _vmn_deactivate
+      ;;
+    *)
+      command vmn "$@"
+      ;;
+  esac
+}
+
+v() {
+  local selected id
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    echo 'vmn: fzf is required for the interactive picker. Install fzf or use "vmn list" and "vmn activate <selector>".' >&2
+    return 1
+  fi
+
+  selected=$(command vmn list --fzf | fzf --delimiter=$'\t' --with-nth=2,3,4 --height=40% --reverse) || return
+  id=${selected%%$'\t'*}
+  [[ -z "$id" ]] && return
+  _vmn_activate "$id"
+}
+
+vd() {
+  _vmn_deactivate
 }
 
 _vmn_widget() {
@@ -1203,34 +1274,69 @@ fi"##
 
 fn bash_snippet() -> &'static str {
     r##"# VMN bash integration
-v() {
-  local selected id project_dir activate_path
+_vmn_activate() {
+  local selector project_dir activate_path
+  selector="$1"
+  [[ -z "$selector" ]] && return 1
 
-  if ! command -v fzf >/dev/null 2>&1; then
-    echo 'vmn: fzf is required for the interactive picker. Install fzf or use "vmn list" and source "$(vmn activate-path <selector>)".' >&2
-    return 1
-  fi
-
-  selected=$(vmn list --fzf | fzf --delimiter=$'\t' --with-nth=2,3,4 --height=40% --reverse) || return
-  id=${selected%%$'\t'*}
-  [[ -z "$id" ]] && return
-
-  project_dir=$(vmn project-dir "$id") || return
+  project_dir=$(command vmn project-dir "$selector") || return
   if [[ -n "$project_dir" ]]; then
     cd "$project_dir" || return
   fi
 
-  activate_path=$(vmn activate-path "$id") || return
+  activate_path=$(command vmn activate-path "$selector") || return
   source "$activate_path"
 }
 
-vd() {
+_vmn_deactivate() {
   if declare -F deactivate >/dev/null; then
     deactivate
   else
     echo "No active Python virtual environment." >&2
     return 1
   fi
+}
+
+vmn() {
+  case "$1" in
+    activate)
+      shift
+      if [[ $# -ne 1 ]]; then
+        echo "usage: vmn activate <name-or-id>" >&2
+        return 2
+      fi
+      _vmn_activate "$1"
+      ;;
+    deactivate)
+      shift
+      if [[ $# -ne 0 ]]; then
+        echo "usage: vmn deactivate" >&2
+        return 2
+      fi
+      _vmn_deactivate
+      ;;
+    *)
+      command vmn "$@"
+      ;;
+  esac
+}
+
+v() {
+  local selected id
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    echo 'vmn: fzf is required for the interactive picker. Install fzf or use "vmn list" and "vmn activate <selector>".' >&2
+    return 1
+  fi
+
+  selected=$(command vmn list --fzf | fzf --delimiter=$'\t' --with-nth=2,3,4 --height=40% --reverse) || return
+  id=${selected%%$'\t'*}
+  [[ -z "$id" ]] && return
+  _vmn_activate "$id"
+}
+
+vd() {
+  _vmn_deactivate
 }
 
 if [[ $- == *i* ]]; then
@@ -1308,6 +1414,45 @@ fn python_executable(root: &Path) -> PathBuf {
 
 fn is_venv_root(path: &Path) -> bool {
     path.join("pyvenv.cfg").is_file() && activation_script(path).is_file()
+}
+
+fn launch_activated_subshell(env: &Environment, activate: &Path) -> Result<()> {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string());
+    let project_dir = env.project_dir.clone().unwrap_or_default();
+
+    let status = Command::new(&shell)
+        .arg("-c")
+        .arg(
+            r#"if [ -n "$1" ]; then
+  cd "$1" || exit 101
+fi
+. "$2" || exit 102
+if [ -n "${VMN_ACTIVATE_TEST_NO_EXEC:-}" ]; then
+  printf '%s\n' "${VIRTUAL_ENV:-}"
+  pwd
+  exit 0
+fi
+printf 'vmn: activated %s. Type exit to return to the previous shell.\n' "$3" >&2
+exec "${SHELL:-/bin/sh}" -i
+exit 103"#,
+        )
+        .arg("vmn-activate")
+        .arg(&project_dir)
+        .arg(activate)
+        .arg(&env.name)
+        .env("SHELL", &shell)
+        .status()
+        .with_context(|| format!("failed to launch shell {shell}"))?;
+
+    match status.code() {
+        Some(101) => bail!("failed to change to project directory {project_dir}"),
+        Some(102) => bail!("failed to activate {}", activate.display()),
+        Some(103) => bail!("failed to start interactive shell {shell}"),
+        _ => Ok(()),
+    }
 }
 
 fn is_permission_error(error: &walkdir::Error) -> bool {

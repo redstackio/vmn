@@ -35,7 +35,14 @@ impl TestState {
 fn fake_env(path: &Path) {
     fs::create_dir_all(path.join("bin")).unwrap();
     fs::write(path.join("pyvenv.cfg"), "home = /usr/bin\n").unwrap();
-    fs::write(path.join("bin").join("activate"), "# activate\n").unwrap();
+    fs::write(
+        path.join("bin").join("activate"),
+        format!(
+            "VIRTUAL_ENV='{}'\nexport VIRTUAL_ENV\nPATH=\"$VIRTUAL_ENV/bin:$PATH\"\nexport PATH\n",
+            path.display()
+        ),
+    )
+    .unwrap();
 }
 
 fn current_python_major_minor() -> String {
@@ -57,6 +64,7 @@ fn init_prints_zsh_snippet_and_creates_state() {
         .assert()
         .success()
         .stdout(predicate::str::contains("VMN zsh integration"))
+        .stdout(predicate::str::contains("vmn activate <name-or-id>"))
         .stdout(predicate::str::contains("vmn list --fzf"));
 
     assert!(state.config_dir.join("config.toml").is_file());
@@ -74,6 +82,7 @@ fn init_prints_bash_snippet() {
         .success()
         .stdout(predicate::str::contains("VMN bash integration"))
         .stdout(predicate::str::contains("bind -x"))
+        .stdout(predicate::str::contains("vmn activate <name-or-id>"))
         .stdout(predicate::str::contains("vmn list --fzf"));
 }
 
@@ -123,6 +132,18 @@ fn scan_lists_and_activates_fake_project_env() {
         .args(["project-dir", "project"])
         .assert()
         .success()
+        .stdout(predicate::str::contains(project.to_string_lossy().as_ref()));
+
+    state
+        .cmd()
+        .args(["activate", "project"])
+        .env("SHELL", "/bin/sh")
+        .env("VMN_ACTIVATE_TEST_NO_EXEC", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            project.join(".venv").to_string_lossy().as_ref(),
+        ))
         .stdout(predicate::str::contains(project.to_string_lossy().as_ref()));
 }
 

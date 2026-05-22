@@ -30,11 +30,11 @@ Pick an environment in fzf. `vmn` changes into that environment's project direct
 - Optional: `fzf` for the interactive shell picker.
 - Optional: zsh or bash for generated shell integration.
 
-`vmn` targets Unix-like developer environments: Linux, macOS, and WSL2. The CLI commands work without shell integration or fzf. Shell integration is only needed for the `v` picker to activate a venv in the current parent shell.
+`vmn` targets Unix-like developer environments: Linux, macOS, and WSL2. The CLI commands work without shell integration or fzf. Shell integration is only needed for the `v` picker and for `vmn activate`/`vmn deactivate` to mutate the current parent shell. Without shell integration, `vmn activate <selector>` starts a child shell with the venv active.
 
 ## Install
 
-From crates.io, after the first public release:
+From crates.io:
 
 ```zsh
 cargo install vmn
@@ -93,7 +93,7 @@ If `fzf` is not installed, the CLI still works. Use:
 
 ```zsh
 vmn list
-source "$(vmn activate-path <selector>)"
+vmn activate <selector>
 ```
 
 ## Quick Start
@@ -121,6 +121,13 @@ Open the picker:
 
 ```zsh
 v
+```
+
+Activate directly without the picker or shell integration:
+
+```zsh
+vmn activate api
+exit
 ```
 
 Deactivate:
@@ -261,6 +268,28 @@ Print the associated project directory when known. Managed envs without a projec
 vmn project-dir api
 ```
 
+### `vmn activate`
+
+Activate an environment by selector.
+
+```zsh
+vmn activate api
+```
+
+With shell integration installed, this changes the current shell, changes into the associated project directory when one is known, and sources the venv activation script.
+
+Without shell integration, `vmn` cannot modify its parent shell, so it starts a child shell with `VIRTUAL_ENV` and `PATH` configured for the selected venv. Type `exit` to return to the previous shell.
+
+### `vmn deactivate`
+
+Deactivate the current environment when shell integration is installed.
+
+```zsh
+vmn deactivate
+```
+
+Without shell integration, leave a standalone activated subshell with `exit`.
+
 ### `vmn activate-path`
 
 Print only the activation script path and update `last_used_at`.
@@ -269,7 +298,7 @@ Print only the activation script path and update `last_used_at`.
 source "$(vmn activate-path api)"
 ```
 
-The shell integration uses this internally. `vmn` does not print shell code to be evaluated.
+The shell integration uses this internally. Prefer `vmn activate <selector>` for normal interactive use.
 
 ### `vmn doctor`
 
@@ -361,7 +390,7 @@ Without fzf, use direct activation:
 
 ```zsh
 vmn list
-source "$(vmn activate-path <selector>)"
+vmn activate <selector>
 ```
 
 ### `v` is not found
@@ -382,7 +411,17 @@ type v
 
 ### The picker opens but activation does not stick
 
-Activation must happen in the parent shell. Use the shell function from `vmn init --shell zsh` or `vmn init --shell bash`, not `vmn` directly.
+Activation that persists in the current shell must happen through shell integration from `vmn init --shell zsh` or `vmn init --shell bash`. Without that integration, `vmn activate <selector>` intentionally opens an activated child shell instead.
+
+### `pip` reports `externally-managed-environment`
+
+That message means system Python/pip is being used instead of the venv. Activate with:
+
+```zsh
+vmn activate <selector>
+```
+
+If shell integration is not installed, this opens a child shell. Install packages inside that shell, then type `exit` when done.
 
 ### I selected an env but it did not cd where I expected
 

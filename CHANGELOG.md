@@ -4,6 +4,13 @@ All notable changes to `vmn` will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-21
+
+### Added
+
+- Added standalone `vmn activate <selector>` support. Without shell integration, it launches a child shell with the venv active and changes to the associated project directory when known.
+- Added `vmn activate` and `vmn deactivate` handling to generated zsh/bash shell integration, so the same commands work with or without shell setup.
+
 ## [0.1.1] - 2026-05-21
 
 ### Added
